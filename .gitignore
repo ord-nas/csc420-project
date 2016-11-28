@@ -90,3 +90,6 @@ ENV/
 
 # Dataset
 Dataset/
+
+# Emacs backup files
+*~
