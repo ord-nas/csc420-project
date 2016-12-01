@@ -98,7 +98,7 @@ def expand_training_data(all_imgs, train_patches, train_labels, train_centres, t
         my_train_img_ids = train_img_ids[lookup]
         cnt = my_train_centres.shape[0]
         assert cnt != 0
-        
+
         # Initalize some stuff
         for i in xrange(desired_cnt_per_category):
             centre = my_train_centres[i % cnt]
@@ -106,7 +106,7 @@ def expand_training_data(all_imgs, train_patches, train_labels, train_centres, t
             img = all_imgs[img_id]
             (delta, flip, rot, hsv_factor) = choose_aug(img, centre, H, W)
             patch = apply_aug(img, centre, delta, flip, rot, hsv_factor, H, W)
-            
+
             offset = c*desired_cnt_per_category + i
             patches[offset] = patch
             labels[offset,c] = 1
@@ -145,7 +145,7 @@ def choose_aug(img, centre, H, W):
                 x + dx + halfW < imgW and
                 y + dy - halfH >= 0 and
                 y + dy + halfH < imgH)
-    
+
     # Iterate over each neighbour position
     deltas = []
     d = 3 # Parameter, should ultimately be factored out
@@ -153,7 +153,7 @@ def choose_aug(img, centre, H, W):
         for dy in range(-d, d+1):
             if dx**2 + dy**2 <= d**2 and inbounds(dx, dy):
                 deltas.append(np.array([dx, dy]))
-    
+
     # Choose stuff
     delta = deltas[np.random.choice(len(deltas))]
     #if how_many_times < 10:
@@ -174,7 +174,7 @@ def apply_aug(img, centre, delta, flip, rot, hsv_factors, H, W):
     assert W%2==1
     halfH = (W-1)/2
     halfW = (H-1)/2
-    
+
     (x, y) = centre
     (dx, dy) = delta
     patch = img[y+dy-halfH:y+dy+halfW+1,x+dx-halfW:x+dx+halfW+1,:]
@@ -185,6 +185,58 @@ def apply_aug(img, centre, delta, flip, rot, hsv_factors, H, W):
     patch = np.maximum(0.0, np.minimum(1.0, patch * hsv_factors))
     patch = np.maximum(0, np.minimum(255, np.round(255 * matplotlib.colors.hsv_to_rgb(patch)))).astype('uint8')
     return patch
+
+def get_augmented_dataset(
+        categories,
+        desired_cnt_per_category=15000,
+        num=100,
+        H=27,
+        W=27,
+        train_fraction=0.8):
+    # Read in the raw data
+    (raw_imgs, raw_centres, raw_labels) = get_dataset(num, categories)
+
+    # Extract example patches from the data
+    H = 27
+    W = 27
+    (patches, labels, centres, img_ids) = get_examples(
+        raw_imgs, raw_centres, raw_labels, H, W)
+
+    # Organize examples into training and test data
+    N = patches.shape[0]
+    num_train = int(train_fraction * N)
+    np.random.seed(0) # predictable shuffling for now
+    perm = np.random.permutation(N)
+    train_patches, test_patches = np.split(patches[perm], [num_train])
+    train_labels, test_labels = np.split(labels[perm], [num_train])
+    train_centres, test_centres = np.split(centres[perm], [num_train])
+    train_img_ids, test_img_ids = np.split(img_ids[perm], [num_train])
+    # Convert to float
+    train_patches = train_patches / 255.0
+    test_patches = test_patches / 255.0
+
+    # Expand/augment the training data
+    sorted_train_dict = expand_training_data(
+        raw_imgs, train_patches, train_labels, train_centres, train_img_ids,
+        desired_cnt_per_category)
+    # Convert to float
+    sorted_train_dict['patches'] = sorted_train_dict['patches'] / 255.0
+
+    # Suffle the augmented training data
+    trainN = sorted_train_dict['patches'].shape[0]
+    np.random.seed(123) # predictable shuffling for now
+    perm = np.random.permutation(trainN)
+    train_dict = {k : v[perm] for (k, v) in sorted_train_dict.iteritems()}
+
+    # Construct the test data dictionary
+    test_dict = {
+        'patches' : test_patches,
+        'labels' : test_labels,
+        'centres' : test_centres,
+        'img_ids' : test_img_ids,
+    }
+
+    return train_dict, test_dict
 
 # CLASSIFICATION STATISTICS
 
