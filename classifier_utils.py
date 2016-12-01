@@ -197,8 +197,6 @@ def get_augmented_dataset(
     (raw_imgs, raw_centres, raw_labels) = get_dataset(num, categories)
 
     # Extract example patches from the data
-    H = 27
-    W = 27
     (patches, labels, centres, img_ids) = get_examples(
         raw_imgs, raw_centres, raw_labels, H, W)
 
