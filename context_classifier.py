@@ -62,6 +62,109 @@ def compute_probability_neighbourhoods(sess, data, patch_model, bin_size=27, con
 
     return (probabilities, weight_neighbourhoods)
 
+def get_NEP_prediction(sess, patch_tensor, prediction_tensor, img, centre, H, W, d):
+    assert H%2==1
+    assert W%2==1
+    halfH = (W-1)/2
+    halfW = (H-1)/2
+    (imgH, imgW, _) = img.shape
+    (x, y) = centre
+
+    # Helper function to check for out of bounds
+    def inbounds(dx, dy):
+        return (x + dx - halfW >= 0 and
+                x + dx + halfW < imgW and
+                y + dy - halfH >= 0 and
+                y + dy + halfH < imgH)
+    
+    # Iterate over each neighbour position
+    patches = []
+    for dx in range(-d, d+1):
+        for dy in range(-d, d+1):
+            if dx**2 + dy**2 <= d**2 and inbounds(dx, dy):
+                patches.append(img[y+dy-halfH:y+dy+halfW+1,x+dx-halfW:x+dx+halfW+1,:])
+                #print (dx, dy, math.sqrt(dx**2+dy**2))
+    assert len(patches) > 0
+    patches = np.stack(patches)
+    #print patches.shape
+
+    # Run prediction
+    predictions = sess.run(prediction_tensor, feed_dict={
+            patch_tensor: patches,
+        })
+    
+    # Get average prediction
+    #print predictions.shape
+    average_predictions = np.mean(predictions, axis=0)
+    #print average_predictions.shape
+    return (average_predictions, patches)
+
+def get_all_NEP_predictions(sess, data, patch_model, all_imgs, d=4, H=27, W=27):
+    (N, C) = data['labels'].shape
+    probabilities = np.zeros((N,C)) 
+    for i in xrange(N):
+        (avg_pred, _) = get_NEP_prediction(sess,
+                                           patch_model.patch_tensor,
+                                           patch_model.inference_predictions,
+                                           all_imgs[data['img_ids'][i]],
+                                           data['centres'][i],
+                                           H,
+                                           W,
+                                           d)
+        probabilities[i] = avg_pred
+
+    return probabilities
+                            
+def compute_probability_neighbourhoods_with_NEP(sess, data, patch_model, all_imgs, bin_size=27, context_length=7):
+    # context_length must be odd
+    assert context_length % 2 == 1
+    
+    # First we want to compute everybody's probabilities
+    probabilities = get_all_NEP_predictions(sess, data, patch_model, all_imgs)
+
+    # Next group all of the input patches by image
+    (N, C) = data['labels'].shape
+    patches_by_img = {}
+    for i in xrange(N):
+        img_id = data['img_ids'][i]
+        if img_id not in patches_by_img:
+            patches_by_img[img_id] = list()
+        patches_by_img[img_id].append(i)
+
+    # Figure out the maximum width and height we need to care about
+    imgW = np.max(data['centres'][:, 0])
+    imgH = np.max(data['centres'][:, 1])
+    # Convert that to bin indices
+    bin_count_x = int(math.floor(imgW / bin_size)) + 1
+    bin_count_y = int(math.floor(imgH / bin_size)) + 1
+
+    # Create an array to keep track of each patch's neighbourhood of
+    # probability weight.
+    weight_neighbourhoods = np.zeros((N, context_length, context_length, C))
+
+    # Now consider each image
+    for (img_id, indices) in patches_by_img.iteritems():
+        # Build a 2D map of probability weight over this entire image
+        weight = np.zeros((bin_count_y, bin_count_x, C))
+        for i in indices:
+            (x, y) = data['centres'][i]
+            bin_x = int(math.floor(x / bin_size))
+            bin_y = int(math.floor(y / bin_size))
+            weight[bin_y, bin_x] += probabilities[i]
+
+        # Once we've built the map, let's read off the neighbourhoods
+        # and insert them into our big array.
+        delta = (context_length-1)/2
+        weight = np.pad(weight, ((delta, delta), (delta, delta), (0, 0)), 'constant')
+        for i in indices:
+            (x, y) = data['centres'][i]
+            bin_x = int(math.floor(x / bin_size)) + delta
+            bin_y = int(math.floor(y / bin_size)) + delta
+            weight_neighbourhoods[i] = weight[bin_y-delta:bin_y+delta+1,
+                                              bin_x-delta:bin_x+delta+1]
+
+    return (probabilities, weight_neighbourhoods)
+
 # Builder functions
 
 def classifier_model(probability_batch, neighbourhood_batch):
