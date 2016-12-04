@@ -72,7 +72,7 @@ def classifier_model(probability_batch, neighbourhood_batch):
                         weights_regularizer=slim.l2_regularizer(0.01),
                         biases_regularizer=None,
                         normalizer_fn=slim.batch_norm):
-        with slim.arg_scope([slim.dropout], keep_prob=0.3):
+        with slim.arg_scope([slim.dropout], keep_prob=0.25):
             # Combine the probabilities and the neighbourhood together
             # as a single flat vector
             net = tf.concat(1,
@@ -133,6 +133,9 @@ class ContextModel():
                    epochs,
                    batch_size,
                    reset=True):
+        if not os.path.exists("context_models/neighbourhood_models/tmp/"):
+            os.makedirs("context_models/neighbourhood_models/tmp/")
+        best_f1 = 0.0
         tr_loss = []
         tst_loss = []
         N = train_probabilities.shape[0]
@@ -156,6 +159,12 @@ class ContextModel():
                         self.label_tensor:test_labels,
                     })
                     print "Epoch %d, step %d, training loss %f, test_loss %f, accuracy = %f/%f, f1 = %f" % (e, step, loss, test_loss, dacc, acc, f)
+                    # Implement early stopping
+                    if not math.isnan(f) and f > best_f1 and f > 0.8:
+                        best_f1 = f
+                        saver = tf.train.Saver(write_version=1)
+                        save_path = saver.save(sess, "context_models/neighbourhood_models/tmp/model.ckpt")
+                        print "Model is best seen so far. Saved to:", save_path
                     tr_loss.append(loss)
                     tst_loss.append(test_loss)
             [test_loss, dacc, acc, f, conf] = sess.run(
