@@ -236,6 +236,67 @@ def get_augmented_dataset(
 
     return train_dict, test_dict
 
+def get_augmented_dataset_divided_per_image(
+        categories,
+        desired_cnt_per_category=15000,
+        num=100,
+        H=27,
+        W=27,
+        train_fraction=0.8):
+    # Read in the raw data
+    (raw_imgs, raw_centres, raw_labels) = [np.array(x) for x in get_dataset(num, categories)]
+
+    # Okay, so we want to divide the dataset into train and test *by
+    # image* instead of by patch as before. This means that certain
+    # images will be entirely training data, including all their
+    # patches, and others will be entirely test data.
+    np.random.seed(9999) # predictable shuffling for now
+
+    # Organize examples into training and test data
+    N = len(raw_imgs)
+    num_train = int(train_fraction * N)
+    np.random.seed(0) # predictable shuffling for now
+    perm = np.random.permutation(N)
+    train_raw_imgs, test_raw_imgs = np.split(raw_imgs[perm], [num_train])
+    train_raw_labels, test_raw_labels = np.split(raw_labels[perm], [num_train])
+    train_raw_centres, test_raw_centres = np.split(raw_centres[perm], [num_train])
+    shuffled_img_ids = np.arange(N)[perm]
+    
+    # Extract patches from both the train and test images
+    (train_patches, train_labels, train_centres, train_img_ids) = get_examples(
+        train_raw_imgs, train_raw_centres, train_raw_labels, H, W)
+    train_img_ids = np.array([shuffled_img_ids[i] for i in train_img_ids])
+    (test_patches, test_labels, test_centres, test_img_ids) = get_examples(
+        test_raw_imgs, test_raw_centres, test_raw_labels, H, W)
+    test_img_ids = np.array([shuffled_img_ids[i+num_train] for i in test_img_ids])
+
+    # Convert to float
+    train_patches = train_patches / 255.0
+    test_patches = test_patches / 255.0
+
+    # Expand/augment the training data
+    sorted_train_dict = expand_training_data(
+        raw_imgs, train_patches, train_labels, train_centres, train_img_ids,
+        desired_cnt_per_category)
+    # Convert to float
+    sorted_train_dict['patches'] = sorted_train_dict['patches'] / 255.0
+
+    # Suffle the augmented training data
+    trainN = sorted_train_dict['patches'].shape[0]
+    perm = np.random.permutation(trainN)
+    train_dict = {k : v[perm] for (k, v) in sorted_train_dict.iteritems()}
+
+    # Construct the test data dictionary
+    test_dict = {
+        'patches' : test_patches,
+        'labels' : test_labels,
+        'centres' : test_centres,
+        'img_ids' : test_img_ids,
+    }
+
+    return train_dict, test_dict
+
+
 # CLASSIFICATION STATISTICS
 
 # Simple % of examples correctly classified.
