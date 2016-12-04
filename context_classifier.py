@@ -69,20 +69,21 @@ def classifier_model(probability_batch, neighbourhood_batch):
                         activation_fn=tf.nn.relu,
                         weights_initializer=tf.truncated_normal_initializer(stddev=0.01),
                         biases_initializer=tf.constant_initializer(0.1),
-                        weights_regularizer=slim.l2_regularizer(0.0005),
-                        biases_regularizer=None):
-        with slim.arg_scope([slim.dropout], keep_prob=0.5):
+                        weights_regularizer=slim.l2_regularizer(0.01),
+                        biases_regularizer=None,
+                        normalizer_fn=slim.batch_norm):
+        with slim.arg_scope([slim.dropout], keep_prob=0.3):
             # Combine the probabilities and the neighbourhood together
             # as a single flat vector
             net = tf.concat(1,
                             [probability_batch,
                              slim.flatten(neighbourhood_batch, scope='1_flatten')],
                             name='1_concat')
-            net = slim.fully_connected(net, 512, scope='1_fc')
+            net = slim.fully_connected(net, 256, scope='1_fc')
             net = slim.dropout(net, scope='1_dropout')
-            net = slim.fully_connected(net, 512, scope='2_fc')
+            net = slim.fully_connected(net, 256, scope='2_fc')
             net = slim.dropout(net, scope='1_dropout')
-            net = slim.fully_connected(net, 512, scope='3_fc')
+            net = slim.fully_connected(net, 256, scope='3_fc')
             net = slim.dropout(net, scope='1_dropout')
             net = slim.fully_connected(net, 4, activation_fn=None, scope='4_fc')
             return net
@@ -102,11 +103,13 @@ class ContextModel():
             dtype='float32', shape=(None, context_length, context_length, 4))
         self.label_tensor = tf.placeholder(dtype='int32', shape=(None, 4))
         with tf.variable_scope("context_classifier"):
-            with slim.arg_scope([slim.dropout], is_training=True):
+            with slim.arg_scope([slim.dropout], is_training=True), \
+                 slim.arg_scope([slim.fully_connected], normalizer_params={'is_training':True}):
                 self.prediction_logits = classifier_model(
                     self.probability_tensor, self.neighbourhood_tensor)
         with tf.variable_scope("context_classifier", reuse=True):
-            with slim.arg_scope([slim.dropout], is_training=False):
+            with slim.arg_scope([slim.dropout], is_training=False), \
+                 slim.arg_scope([slim.fully_connected], normalizer_params={'is_training':False}):
                 self.inference_prediction_logits = classifier_model(
                     self.probability_tensor, self.neighbourhood_tensor)
         (self.train_op, self.loss) = get_training_op(self.prediction_logits,
