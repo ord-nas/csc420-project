@@ -1,3 +1,5 @@
+# This file implements the Context CNN.
+
 import tensorflow as tf
 import numpy as np
 import os
@@ -6,6 +8,9 @@ import tensorflow.contrib.slim as slim
 
 import classifier_utils as utils
 
+# For each patch in the 'data' dictionary, compute the raw probability
+# assignment for that patch, and the probability totals for that
+# patch's neighbourhood.
 def compute_probability_neighbourhoods(sess, data, patch_model, bin_size=27, context_length=7):
     # context_length must be odd
     assert context_length % 2 == 1
@@ -62,59 +67,8 @@ def compute_probability_neighbourhoods(sess, data, patch_model, bin_size=27, con
 
     return (probabilities, weight_neighbourhoods)
 
-def get_NEP_prediction(sess, patch_tensor, prediction_tensor, img, centre, H, W, d):
-    assert H%2==1
-    assert W%2==1
-    halfH = (W-1)/2
-    halfW = (H-1)/2
-    (imgH, imgW, _) = img.shape
-    (x, y) = centre
-
-    # Helper function to check for out of bounds
-    def inbounds(dx, dy):
-        return (x + dx - halfW >= 0 and
-                x + dx + halfW < imgW and
-                y + dy - halfH >= 0 and
-                y + dy + halfH < imgH)
-    
-    # Iterate over each neighbour position
-    patches = []
-    for dx in range(-d, d+1):
-        for dy in range(-d, d+1):
-            if dx**2 + dy**2 <= d**2 and inbounds(dx, dy):
-                patches.append(img[y+dy-halfH:y+dy+halfW+1,x+dx-halfW:x+dx+halfW+1,:])
-                #print (dx, dy, math.sqrt(dx**2+dy**2))
-    assert len(patches) > 0
-    patches = np.stack(patches)
-    #print patches.shape
-
-    # Run prediction
-    predictions = sess.run(prediction_tensor, feed_dict={
-            patch_tensor: patches,
-        })
-    
-    # Get average prediction
-    #print predictions.shape
-    average_predictions = np.mean(predictions, axis=0)
-    #print average_predictions.shape
-    return (average_predictions, patches)
-
-def get_all_NEP_predictions(sess, data, patch_model, all_imgs, d=4, H=27, W=27):
-    (N, C) = data['labels'].shape
-    probabilities = np.zeros((N,C)) 
-    for i in xrange(N):
-        (avg_pred, _) = get_NEP_prediction(sess,
-                                           patch_model.patch_tensor,
-                                           patch_model.inference_predictions,
-                                           all_imgs[data['img_ids'][i]],
-                                           data['centres'][i],
-                                           H,
-                                           W,
-                                           d)
-        probabilities[i] = avg_pred
-
-    return probabilities
-                            
+# Same as above, but use NEP predictions as input instead of plain
+# Softmax CNN predictions.
 def compute_probability_neighbourhoods_with_NEP(sess, data, patch_model, all_imgs, bin_size=27, context_length=7):
     # context_length must be odd
     assert context_length % 2 == 1
@@ -165,8 +119,64 @@ def compute_probability_neighbourhoods_with_NEP(sess, data, patch_model, all_img
 
     return (probabilities, weight_neighbourhoods)
 
+# Compute the NEP prediction for the given patch. Finds all patches
+# within distance d of the centre, computes the predictions for each
+# of those patches, and returns the average.
+def get_NEP_prediction(sess, patch_tensor, prediction_tensor, img, centre, H, W, d):
+    assert H%2==1
+    assert W%2==1
+    halfH = (W-1)/2
+    halfW = (H-1)/2
+    (imgH, imgW, _) = img.shape
+    (x, y) = centre
+
+    # Helper function to check for out of bounds
+    def inbounds(dx, dy):
+        return (x + dx - halfW >= 0 and
+                x + dx + halfW < imgW and
+                y + dy - halfH >= 0 and
+                y + dy + halfH < imgH)
+    
+    # Iterate over each neighbour position
+    patches = []
+    for dx in range(-d, d+1):
+        for dy in range(-d, d+1):
+            if dx**2 + dy**2 <= d**2 and inbounds(dx, dy):
+                patches.append(img[y+dy-halfH:y+dy+halfW+1,x+dx-halfW:x+dx+halfW+1,:])
+    assert len(patches) > 0
+    patches = np.stack(patches)
+
+    # Run prediction
+    predictions = sess.run(prediction_tensor, feed_dict={
+            patch_tensor: patches,
+        })
+    
+    # Get average prediction
+    average_predictions = np.mean(predictions, axis=0)
+    return (average_predictions, patches)
+
+# Get NEP predictions for the entire dataset.
+def get_all_NEP_predictions(sess, data, patch_model, all_imgs, d=4, H=27, W=27):
+    (N, C) = data['labels'].shape
+    probabilities = np.zeros((N,C)) 
+    for i in xrange(N):
+        (avg_pred, _) = get_NEP_prediction(sess,
+                                           patch_model.patch_tensor,
+                                           patch_model.inference_predictions,
+                                           all_imgs[data['img_ids'][i]],
+                                           data['centres'][i],
+                                           H,
+                                           W,
+                                           d)
+        probabilities[i] = avg_pred
+
+    return probabilities
+                            
+
 # Builder functions
 
+# This little function is the definition of the model! Everything else
+# is pretty much just infrastructure.
 def classifier_model(probability_batch, neighbourhood_batch):
     with slim.arg_scope([slim.fully_connected],
                         activation_fn=tf.nn.relu,
@@ -191,6 +201,8 @@ def classifier_model(probability_batch, neighbourhood_batch):
             net = slim.fully_connected(net, 4, activation_fn=None, scope='4_fc')
             return net
 
+# Create a softmax loss tensor and add in the regularization
+# loss. Create a training tensor that uses the momentum optimizer.
 def get_training_op(prediction_logits, labels, learning_rate=5e-4):
     loss = slim.losses.softmax_cross_entropy(prediction_logits, labels)
     total_loss = slim.losses.get_total_loss()
@@ -200,16 +212,19 @@ def get_training_op(prediction_logits, labels, learning_rate=5e-4):
 
 # Main model class
 class ContextModel():
+    # On initialization, construct the model and all placeholders.
     def __init__(self, learning_rate=5e-4, context_length=7):
         self.probability_tensor = tf.placeholder(dtype='float32', shape=(None, 4))
         self.neighbourhood_tensor = tf.placeholder(
             dtype='float32', shape=(None, context_length, context_length, 4))
         self.label_tensor = tf.placeholder(dtype='int32', shape=(None, 4))
-        with tf.variable_scope("context_classifier"):
+         # This version runs during training
+       with tf.variable_scope("context_classifier"):
             with slim.arg_scope([slim.dropout], is_training=True), \
                  slim.arg_scope([slim.fully_connected], normalizer_params={'is_training':True}):
                 self.prediction_logits = classifier_model(
                     self.probability_tensor, self.neighbourhood_tensor)
+        # This version runs during inference.
         with tf.variable_scope("context_classifier", reuse=True):
             with slim.arg_scope([slim.dropout], is_training=False), \
                  slim.arg_scope([slim.fully_connected], normalizer_params={'is_training':False}):
@@ -218,6 +233,7 @@ class ContextModel():
         (self.train_op, self.loss) = get_training_op(self.prediction_logits,
                                                      self.label_tensor,
                                                      learning_rate=learning_rate)
+        # Compute useful output on top of the network predictions.
         self.predictions = slim.softmax(self.prediction_logits)
         self.inference_predictions = slim.softmax(self.inference_prediction_logits)
         self.dropout_accuracy = utils.get_accuracy(self.predictions, self.label_tensor)
@@ -225,6 +241,7 @@ class ContextModel():
         self.f1 = utils.get_weighted_f1(self.inference_predictions, self.label_tensor)
         self.confusion = utils.get_confusion(self.inference_predictions, self.label_tensor)
 
+    # This is the main loop which trains the model.
     def train_loop(self,
                    sess,
                    train_probabilities,

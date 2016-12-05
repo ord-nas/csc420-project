@@ -1,3 +1,7 @@
+# This file implements a bunch of utilities that are generally useful
+# across the classifiers. This includes dataset reading, computing
+# interesting statistics, and visualization.
+
 import tensorflow as tf
 from scipy.io import loadmat
 import matplotlib
@@ -186,6 +190,9 @@ def apply_aug(img, centre, delta, flip, rot, hsv_factors, H, W):
     patch = np.maximum(0, np.minimum(255, np.round(255 * matplotlib.colors.hsv_to_rgb(patch)))).astype('uint8')
     return patch
 
+# Read in the dataset, split into train a test set, and perform
+# augmentation and shuffling. Returns (train, test) pair, where each
+# is a dictionary of data.
 def get_augmented_dataset(
         categories,
         desired_cnt_per_category=15000,
@@ -236,6 +243,10 @@ def get_augmented_dataset(
 
     return train_dict, test_dict
 
+# Same as above, but we want to divide the dataset into train and test
+# *by image* instead of by patch as before. This means that certain
+# images will be entirely training data, including all their patches,
+# and others will be entirely test data.
 def get_augmented_dataset_divided_per_image(
         categories,
         desired_cnt_per_category=15000,
@@ -246,10 +257,6 @@ def get_augmented_dataset_divided_per_image(
     # Read in the raw data
     (raw_imgs, raw_centres, raw_labels) = [np.array(x) for x in get_dataset(num, categories)]
 
-    # Okay, so we want to divide the dataset into train and test *by
-    # image* instead of by patch as before. This means that certain
-    # images will be entirely training data, including all their
-    # patches, and others will be entirely test data.
     np.random.seed(9999) # predictable shuffling for now
 
     # Organize examples into training and test data
@@ -296,7 +303,7 @@ def get_augmented_dataset_divided_per_image(
 
     return train_dict, test_dict
 
-# This version gives you the NON-augmented version
+# Same as above, but skips traning data augmentation
 def get_dataset_divided_per_image(
         categories,
         desired_cnt_per_category=15000,

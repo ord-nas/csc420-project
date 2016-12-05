@@ -1,3 +1,5 @@
+# This is my implementation of multiclass SVM.
+
 import numpy as np
 
 # gradient of y wrt w given x, activations, and C
@@ -69,40 +71,32 @@ def get_multiclass_predictions(x, ws, add_ones=True):
     per_class_predictions = np.where(values > 0, 1, -1)
     return (predictions, per_class_predictions)
 
-def train_loop(x, y, test_x, test_y, C, learning_rate, batch_size, epochs):
-    pass
-
+# We need to reimplement this here, since the implementation in
+# classifier_utils.py is based on TensorFlow, and we want to implement
+# from scratch.
 def get_np_weighted_f1(predictions, actual, num_labels):
     try:
         f1s = []
         totals = []
         for label in xrange(num_labels):
-            #print "Label", label
             true_positives = np.count_nonzero(np.logical_and(np.equal(label, actual),
                                                              np.equal(label, predictions)))
-            #print "TP", true_positives
             positive_labels = np.count_nonzero(np.equal(label, actual))
-            #print "PL", positive_labels
             positive_predictions = np.count_nonzero(np.equal(label, predictions))
-            #print "PP", positive_predictions
             recall = float(true_positives) / float(positive_labels)
-            #print "Recall", recall
             precision = float(true_positives) / float(positive_predictions)
-            #print "Precision", precision
             f1 = 2*precision*recall / (precision + recall)
-            #print "F1", f1
             f1s.append(f1)
             totals.append(positive_labels)
         total_weight = float(sum(totals))
-        #print "Total weight", total_weight
         weights = [w / total_weight for w in totals]
-        #print "Weights", weights
         f1_avg = sum([w * f1 for (w, f1) in zip(weights, f1s)])
-        #print "F1_avg", f1_avg
         return f1_avg
     except ZeroDivisionError:
         return 0
 
+# Calculate statistics about our current model. Optinally print them,
+# and return a dictionary of our results.
 def status_report(e, step, x, y, val_x, val_y, test_x, test_y, ws, C, quiet=False):
     training_losses = []
     validation_losses = []
@@ -150,6 +144,8 @@ def status_report(e, step, x, y, val_x, val_y, test_x, test_y, ws, C, quiet=Fals
         'test_f1': test_weighted_f1,
     }
 
+# Train a multiclass SVM. Computes statistics at each training step
+# and implements early stopping.
 def multiclass_train_loop(x, y, val_x, val_y, test_x, test_y, C, learning_rate, batch_size, epochs,
                           quiet=False, init_ws=None):
     # Make status variables global so that we can kill the training loop at any
