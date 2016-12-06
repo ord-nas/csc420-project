@@ -218,8 +218,8 @@ class ContextModel():
         self.neighbourhood_tensor = tf.placeholder(
             dtype='float32', shape=(None, context_length, context_length, 4))
         self.label_tensor = tf.placeholder(dtype='int32', shape=(None, 4))
-         # This version runs during training
-       with tf.variable_scope("context_classifier"):
+        # This version runs during training
+        with tf.variable_scope("context_classifier"):
             with slim.arg_scope([slim.dropout], is_training=True), \
                  slim.arg_scope([slim.fully_connected], normalizer_params={'is_training':True}):
                 self.prediction_logits = classifier_model(
