@@ -1,2 +1,2 @@
-model_checkpoint_path: "cp_cnn_model.ckpt"
-all_model_checkpoint_paths: "cp_cnn_model.ckpt"
+model_checkpoint_path: "legacy_version_model.ckpt"
+all_model_checkpoint_paths: "legacy_version_model.ckpt"
